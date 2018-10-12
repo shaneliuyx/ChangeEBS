@@ -1,0 +1,165 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Deploy a CF tempalte to create a EBS volume type change schedule,triggered by volume tag named ChangeEBSType",
+  "Parameters": {
+    "CloudTrailLogGroup": {
+      "Description": "Please input CloudTrail Log Group name:",
+      "Type": "String",
+      "Default": "CloudTrail/DefaultLogGroup"
+    },
+    "LambdaBucket": {
+      "Type": "String",
+      "Default": "shane",
+      "Description": "S3 bucket that contains ebs_change_scheduler.zip"
+    },
+    "CFUrl": {
+      "Type": "String",
+      "Default": "https://s3.cn-north-1.amazonaws.com.cn/shane/change_ebs_type.json",
+      "Description": "URL that contains CloudForamtion template change_ebs_type.json"
+    }
+  },
+
+  "Resources": {
+    "EBSChangeScheduler": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Role": {
+          "Fn::GetAtt": ["LambdaEBSChangeSchedulerRole", "Arn"]
+        },
+        "Description": "Deploy lambda function to create EBS type change schedule",
+        "Code": {
+          "S3Bucket": {
+            "Ref": "LambdaBucket"
+          },
+          "S3Key": "ebs_change_scheduler_v2.zip"
+        },
+        "Handler": "ebs_change_scheduler_v2.lambda_handler",
+        "Runtime": "python2.7",
+        "Timeout": "300",
+        "MemorySize": "256"
+      }
+    },
+
+    "LambdaEBSChangeSchedulerRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {
+              "Service": [
+                "lambda.amazonaws.com",
+                "events.amazonaws.com"
+              ]
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }]
+        },
+        "Path": "/"
+      }
+    },
+    "IAMPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "DependsOn": [
+        "LambdaEBSChangeSchedulerRole"
+      ],
+      "Properties": {
+        "PolicyName": "EBSChangeScheduler",
+        "Roles": [{
+          "Ref": "LambdaEBSChangeSchedulerRole"
+        }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+              "Effect": "Allow",
+              "Action": [
+                "iam:UpdateAssumeRolePolicy",
+                "iam:GetRole",
+                "ec2:ModifyVolume",
+                "events:DescribeRule",
+                "iam:GetPolicy",
+                "events:PutRule",
+                "iam:DeleteRole",
+                "iam:CreateRole",
+                "cloudformation:*",
+                "iam:PutRolePolicy",
+                "iam:CreatePolicy",
+                "events:PutTargets",
+                "sts:AssumeRole",
+                "iam:PassRole",
+                "iam:DetachRolePolicy",
+                "iam:DeleteRolePolicy",
+                "lambda:*",
+                "events:RemoveTargets",
+                "events:DeleteRule"
+              ],
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents"
+              ],
+              "Resource": "arn:aws-cn:logs:*:*:*"
+            }
+          ]
+        }
+      }
+    },
+    "SubscriptionFilter": {
+      "Type": "AWS::Logs::SubscriptionFilter",
+      "Properties": {
+        "LogGroupName": {
+          "Ref": "CloudTrailLogGroup"
+        },
+        "FilterPattern": "{($.requestParameters.tagSet.items[0].key = \"ChangeEBSType\") && ($.eventName = *Tags) && ($.requestParameters.tagSet.items[0].value!= \"\" ) && ($.requestParameters.resourcesSet.items[0].resourceId = \"vol*\")}",
+        "DestinationArn": {
+          "Fn::GetAtt": ["EBSChangeScheduler", "Arn"]
+        }
+      }
+    },
+
+    "LogGroupLambdaInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "FunctionName": {
+          "Fn::GetAtt": ["EBSChangeScheduler", "Arn"]
+        },
+        "Action": "lambda:InvokeFunction",
+        "Principal": {
+          "Fn::Join": ["", ["logs.", {
+            "Ref": "AWS::Region"
+          }, ".amazonaws.com.cn"]]
+        },
+        "SourceArn": {
+          "Fn::Join": ["", ["arn:aws-cn:logs:", {
+            "Ref": "AWS::Region"
+          }, ":", {
+            "Ref": "AWS::AccountId"
+          }, ":log-group:", {
+            "Ref": "CloudTrailLogGroup"
+          }, ":*"]]
+        },
+        "SourceAccount": {
+          "Ref": "AWS::AccountId"
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "CFPath": {
+      "Description": "The URL of CF",
+      "Value": {
+        "Ref": "CFUrl"
+      },
+      "Export": {
+        "Name": "CFUrl"
+      }
+    }
+  }
+}

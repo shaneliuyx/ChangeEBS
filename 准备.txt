@@ -1,0 +1,98 @@
+import boto3
+
+client = boto3.client('cloudformation')
+response = client.create_stack(
+    StackName='string',
+    TemplateBody='string',
+    TemplateURL='string',
+    Parameters=[
+        {
+            'ParameterKey': 'string',
+            'ParameterValue': 'string',
+            'UsePreviousValue': True|False,
+            'ResolvedValue': 'string'
+        },
+    ],
+    DisableRollback=True|False,
+    RollbackConfiguration={
+        'RollbackTriggers': [
+            {
+                'Arn': 'string',
+                'Type': 'string'
+            },
+        ],
+        'MonitoringTimeInMinutes': 123
+    },
+    TimeoutInMinutes=123,
+    NotificationARNs=[
+        'string',
+    ],
+    Capabilities=[
+        'CAPABILITY_IAM'|'CAPABILITY_NAMED_IAM',
+    ],
+    ResourceTypes=[
+        'string',
+    ],
+    RoleARN='string',
+    OnFailure='DO_NOTHING'|'ROLLBACK'|'DELETE',
+    StackPolicyBody='string',
+    StackPolicyURL='string',
+    Tags=[
+        {
+            'Key': 'string',
+            'Value': 'string'
+        },
+    ],
+    ClientRequestToken='string',
+    EnableTerminationProtection=True|False
+)
+############################################
+response = client.delete_stack(
+    StackName='string',
+    RetainResources=[
+        'string',
+    ],
+    RoleARN='string',
+    ClientRequestToken='string'
+)
+############################################
+response = client.list_stacks(
+    NextToken='string',
+    StackStatusFilter=[
+        'CREATE_IN_PROGRESS'|'CREATE_FAILED'|'CREATE_COMPLETE'|'ROLLBACK_IN_PROGRESS'|'ROLLBACK_FAILED'|'ROLLBACK_COMPLETE'|'DELETE_IN_PROGRESS'|'DELETE_FAILED'|'DELETE_COMPLETE'|'UPDATE_IN_PROGRESS'|'UPDATE_COMPLETE_CLEANUP_IN_PROGRESS'|'UPDATE_COMPLETE'|'UPDATE_ROLLBACK_IN_PROGRESS'|'UPDATE_ROLLBACK_FAILED'|'UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS'|'UPDATE_ROLLBACK_COMPLETE'|'REVIEW_IN_PROGRESS',
+    ]
+)
+
+
+
+{ ($.eventSource = cloudtrail.amazonaws.com) && ( ($.eventName != Describe*) && ($.eventName != Get*) && ($.eventName != Lookup*) && ($.eventName != List*) ) }
+
+
+{ ($.eventName = CreateNetworkAcl) || ($.eventName = CreateNetworkAclEntry) || ($.eventName = DeleteNetworkAcl) || ($.eventName = DeleteNetworkAclEntry) || ($.eventName = ReplaceNetworkAclEntry) || ($.eventName = ReplaceNetworkAclAssociation) }
+
+
+{ ($.requestParameters.tagSet.items[0].key = "ChangeEBSType" ) && ($.eventName = CreateTags) && ($.requestParameters.tagSet.items[0].value != "" ) }
+
+
+"requestParameters": {
+        "resourcesSet": {
+            "items": [
+                {
+                    "resourceId": "vol-0522f08afdaed0989"
+                }
+            ]
+        },
+        "tagSet": {
+            "items": [
+                {
+                    "key": "ChangeEBSType",
+                    "value": "io1:30000:cron(0 13 * * ? *),gp2:100:cron(0 19 * * ? *)"
+                }
+            ]
+        }
+    },
+
+
+Tag:
+Key:    ChangeEBSType
+Value:  io1:30000:cron(0 13 * * ? *),gp2:100:30000:cron(0 19 * * ? *)

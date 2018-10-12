@@ -1,0 +1,156 @@
+"Code": {
+  "ZipFile": {
+    "Fn::Join": [
+      "", [
+        "import json,zlib,boto3,botocore,base64,random,string,os\n",
+        "print('Loading function')\n",
+        "TemplateURL = ",
+        "\"",
+        {
+          "Ref": "URLforClouFormationTemplate"
+        },
+        "\"",
+        "\n",
+        "def sendresponse(event, context, responsestatus, responsedata, reason):\n",
+        "   payload = {\n",
+        "        'StackId': event['StackId'],\n",
+        "        'Status': responsestatus,\n",
+        "        'Reason': reason,\n",
+        "        'RequestId': event['RequestId'],\n",
+        "        'LogicalResourceId': event['LogicalResourceId'],\n",
+        "        'PhysicalResourceId': event['LogicalResourceId'] +\n",
+        "        ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits)\n",
+        "                for _ in range(10)),\n",
+        "        'Data': responsedata\n",
+        "    }\n",
+        "    if debug == 'True':\n",
+        "        print \"Sending %s to %s\" % (json.dumps(payload), event['ResponseURL'])\n",
+        "    requests.put(event['ResponseURL'], data=json.dumps(payload))\n",
+        "    print \"Sent %s to %s\" % (json.dumps(payload), event['ResponseURL'])\n",
+        "def get_cloudtrail_event(event):\n",
+        "    data = base64.b64decode(event['awslogs']['data'])\n",
+        "    data = zlib.decompress(data, 16 + zlib.MAX_WBITS)\n",
+        "    cloudtrail_event = json.loads(data)\n",
+        "    return cloudtrail_event\n",
+        "def get_message_from_cloudtrail_event(log_event):\n",
+        "    old_str = '\\\"'\n",
+        "    new_str = '\"'\n",
+        "    message = log_event['message']\n",
+        "    message = message.replace(old_str, new_str)\n",
+        "    return json.loads(message)\n",
+        "def create_cloudformation(stack_name, parameter1, parameter2, volume_id, client):\n",
+        "    print (\"Create cloudformation stack: %s\" % stack_name)\n",
+        "    try:\n",
+        "        response = client.create_stack(StackName=stack_name, TemplateURL=TemplateURL, Parameters=[\n",
+        "            {'ParameterKey': 'TargetEBSVolumeInfo', 'ParameterValue': parameter1}, {'ParameterKey': 'ScheduleExpression', 'ParameterValue': parameter2}, ], Capabilities=['CAPABILITY_IAM'])\n",
+        "    except Exception as ex:\n",
+        "        print ex.message\n",
+        "def update_cloudformation(stack_name, parameter1, parameter2, volume_id, client):\n",
+        "    print (\"Update cloudformation stack: %s\" % stack_name)\n",
+        "    try:\n",
+        "        response = client.update_stack(StackName=stack_name, UsePreviousTemplate=True, Parameters=[\n",
+        "            {'ParameterKey': 'TargetEBSVolumeInfo', 'ParameterValue': parameter1}, {'ParameterKey': 'ScheduleExpression', 'ParameterValue': parameter2}, ], Capabilities=['CAPABILITY_IAM'])\n",
+        "    except botocore.exceptions.ClientError as ex:\n",
+        "        error_message = ex.response['Error']['Message']\n",
+        "        if error_message == 'No updates are to be performed.':\n",
+        "            print(\"No changes\")\n",
+        "        else:\n",
+        "            raise\n",
+        "def check_valid_stack(stack_name, client):\n",
+        "    try:\n",
+        "        response = client.describe_stacks()\n",
+        "    except Exception as ex:\n",
+        "        print ex.message\n",
+        "    for stack in response['Stacks']:\n",
+        "        if stack_name in stack['StackName']:\n",
+        "            return True\n",
+        "def build_ebs_volume_change_schedule(stack_name, target_schedule, volume_id, client):\n",
+        "    target_type = target_schedule.split(':')\n",
+        "    parameter1 = volume_id + \":\" + target_type[0] + \":\" + target_type[1]\n",
+        "    parameter2 = \"cron\" + target_type[2]\n",
+        "    print (\"CloudForamtion template parameters:{},{}\".format(\n",
+        "        parameter1, parameter2))\n",
+        "    print (\"Volume %s will be changed to %s, IOPS is %s\" %\n",
+        "           (volume_id, target_type[0], target_type[1]))\n",
+        "    print (\"This task will be executed based on %s\" % target_type[2])\n",
+        "    if check_valid_stack(stack_name, client):\n",
+        "        try:\n",
+        "            cloudformation = boto3.resource('cloudformation')\n",
+        "            try:\n",
+        "                stack = cloudformation.Stack(stack_name)\n",
+        "            except Exception as ex:\n",
+        "                print ex.message\n",
+        "            stack_status = stack.stack_status\n",
+        "            print (\"Stack (%s) status: %s\" % (stack_name, stack_status))\n",
+        "            if stack_status == \"ROLLBACK_COMPLETE\" or stack_status == \"ROLLBACK_FAILED\" or stack_status == \"DELETE_FAILED\":\n",
+        "                try:\n",
+        "                    response = client.delete_stack(StackName=stack_name)\n",
+        "                    waiter = client.get_waiter('stack_delete_complete')\n",
+        "                    waiter.wait(StackName=stack_name)\n",
+        "                except Exception as ex:\n",
+        "                    print ex.message\n",
+        "            if stack_status == \"CREATE_IN_PROGRESS\":\n",
+        "                waiter = client.get_waiter('stack_create_complete')\n",
+        "                waiter.wait(StackName=stack_name)\n",
+        "            if stack_status == \"DELETE_IN_PROGRESS\":\n",
+        "                waiter = client.get_waiter('stack_delete_complete')\n",
+        "                waiter.wait(StackName=stack_name)\n",
+        "            if stack_status == \"UPDATE_IN_PROGRESS\":\n",
+        "                waiter = client.get_waiter('stack_update_complete')\n",
+        "                waiter.wait(StackName=stack_name)\n",
+        "        except Exception as ex:\n",
+        "            print ex.message\n",
+        "    if check_valid_stack(stack_name, client):\n",
+        "        update_cloudformation(stack_name, parameter1, parameter2,\n",
+        "                              volume_id, client)\n",
+        "        waiter = client.get_waiter('stack_update_complete')\n",
+        "    else:\n",
+        "        create_cloudformation(stack_name, parameter1, parameter2,\n",
+        "                              volume_id, client)\n",
+        "        waiter = client.get_waiter('stack_create_complete')\n",
+        "def delete_ebs_volume_change_schedule(volume_id, client):\n",
+        "    response = client.describe_stacks()\n",
+        "    for stack in response['Stacks']:\n",
+        "        if volume_id in stack['StackName']:\n",
+        "            try:\n",
+        "                print(\"Delete ,cloudformation stack: %s\" %\n",
+        "                      stack['StackName'])\n",
+        "                response = client.delete_stack(\n",
+        "                    StackName=stack['StackName'])\n",
+        "            except Exception as ex:\n",
+        "                print ex.message\n",
+        "def lambda_handler(event, context):\n",
+        "    try:\n"
+        "        TemplateURL = os.environ['TemplateURL']\n"
+        "    except Exception:\n"
+        "        sendresponse(event, context, 'FAILED', {\n"
+        "                     'Error': 'CF template does not provided'}, \"CF template does not provided\")\n"
+        "        return\n"
+        "    volume_id = []\n"
+        "    client = boto3.client('cloudformation')\n"
+        "    print (event)\n"
+        "    cloudtrail_event = get_cloudtrail_event(event)\n"
+        "    for log_event in cloudtrail_event['logEvents']:\n"
+        "        trail_message = get_message_from_cloudtrail_event(log_event)\n"
+        "        volume_id = trail_message['requestParameters']['resourcesSet']['items'][0]['resourceId']\n"
+        "        if trail_message['eventName'] == \"CreateTags\":\n"
+        "            for item in trail_message['requestParameters']['tagSet']['items']:\n"
+        "                if item['key'] == 'ChangeEBSType':\n"
+        "                    cf_parameter = item['value']\n"
+        "                    break\n"
+        "    if trail_message['eventName'] == \"CreateTags\":\n"
+        "        start_stop = cf_parameter.split(',')\n"
+        "        i = 0\n"
+        "        for schedule in start_stop:\n"
+        "            stack_name = \"change-ebs-type-\" + str(i) + " - " + volume_id\n"
+        "            build_ebs_volume_change_schedule(\n"
+        "                stack_name, schedule, volume_id, client)\n"
+        "            i = i + 1\n"
+        "    if trail_message['eventName'] == \"DeleteTags\":\n"
+        "        delete_ebs_volume_change_schedule(volume_id, client)\n"
+        "    sendresponse(event, context, 'SUCCESS', responsedata, \"N/A\")\n"
+
+      ]
+    ]
+  }
+},

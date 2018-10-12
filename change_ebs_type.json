@@ -1,0 +1,172 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "Change EBS volume type",
+  "Parameters": {
+    "TargetEBSVolumeInfo": {
+      "Description": "Please input the EBS Volume ID, type and IOPS, seperated by ':' , using ',' to seperate different voluemes",
+      "Type": "String"
+    },
+    "ScheduleExpression": {
+      "Description": "Please input schedule expression. For example: cron(0 13 * * ? *), invoke the function at 13:00 (UTC) every day",
+      "Type": "String"
+    }
+  },
+
+  "Resources": {
+    "ModifyEbs": {
+      "Type": "AWS::Lambda::Function",
+      "Properties": {
+        "Role": {
+          "Fn::GetAtt": ["LambdaEbsRole", "Arn"]
+        },
+        "Description": "Change EBS type",
+        "Code": {
+          "ZipFile": {
+            "Fn::Join": [
+              "", [
+                "import boto3,copy \n",
+                "print('Loading function')\n",
+                "DestinationEbs = ",
+                "\"",
+                {
+                  "Ref": "TargetEBSVolumeInfo"
+                },
+                "\"",
+                "\n",
+
+                "def EbsParameters(input):\n",
+                "    EbsSets = {'ebs': []}\n",
+                "    detail = {}\n",
+                "    EbstList = input.split(',')\n",
+                "    for i in range(0, len(EbstList)):\n",
+                "        tmp = EbstList[i].split(':')\n",
+                "        if len(tmp) != 3:\n",
+                "            print ('Parameter input error! exit from EbsParameters()')\n",
+                "            return\n",
+                "        detail['id'] = tmp[0]\n",
+                "        detail['type'] = tmp[1]\n",
+                "        detail['iops'] = tmp[2]\n",
+                "        d = copy.deepcopy(detail)\n",
+                "        EbsSets['ebs'].append(d)\n",
+                "    print ('End EbsParameters')\n",
+                "    return EbsSets\n",
+                "def handler(event, context):\n",
+                "    result = {}\n",
+                "    EbsSet = EbsParameters(DestinationEbs)\n",
+                "    ec2_client = boto3.client('ec2')\n",
+                "    print (EbsSet)\n",
+                "    for ebs in EbsSet['ebs']:\n",
+                "        Vid = ebs['id']\n",
+                "        Iops = int(ebs['iops'])\n",
+                "        Type = ebs['type']\n",
+                "        if Type == 'io1':\n",
+                "            try:\n",
+                "                result = ec2_client.modify_volume(VolumeId=Vid, VolumeType=Type, Iops=Iops)\n",
+                "            except Exception as ex:\n",
+                "                print ('Cannot change volume type')\n",
+                "                print(ex)\n",
+                "        elif Type == 'gp2':\n",
+                "            try:\n",
+                "                result = ec2_client.modify_volume(VolumeId=Vid, VolumeType=Type)\n",
+                "            except Exception as ex:\n",
+                "                print ('Cannot change volume type')\n",
+                "                print(ex)\n",
+                "        else:\n",
+                "            print ('EBS type does not support')\n",
+                "            exit(1)\n",
+                "        print (result)\n",
+              ]
+            ]
+          }
+        },
+        "Handler": "index.handler",
+        "Runtime": "python2.7",
+        "Timeout": "300",
+        "MemorySize": "256"
+      }
+    },
+
+    "LambdaEbsRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+            "Effect": "Allow",
+            "Principal": {
+              "Service": [
+                "lambda.amazonaws.com",
+                "events.amazonaws.com"
+              ]
+            },
+            "Action": [
+              "sts:AssumeRole"
+            ]
+          }]
+        },
+        "Path": "/"
+      }
+    },
+    "IAMPolicy": {
+      "Type": "AWS::IAM::Policy",
+      "DependsOn": [
+        "LambdaEbsRole"
+      ],
+      "Properties": {
+        "PolicyName": "modify_ebs",
+        "Roles": [{
+          "Ref": "LambdaEbsRole"
+        }],
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [{
+              "Effect": "Allow",
+              "Action": "ec2:ModifyVolume",
+              "Resource": "*"
+            },
+            {
+              "Effect": "Allow",
+              "Action": "logs:*",
+              "Resource": "arn:aws-cn:logs:*:*:*"
+            }
+          ]
+        }
+      }
+    },
+    "LambdaInvokePermission": {
+      "Type": "AWS::Lambda::Permission",
+      "Properties": {
+        "Action": "lambda:InvokeFunction",
+        "SourceArn": {
+          "Fn::GetAtt": ["MyEventsRule", "Arn"]
+        },
+        "Principal": "events.amazonaws.com",
+        "FunctionName": {
+          "Fn::GetAtt": ["ModifyEbs", "Arn"]
+        }
+      }
+    },
+    "MyEventsRule": {
+      "Type": "AWS::Events::Rule",
+      "Properties": {
+        "Description": "Events Rule Invoke Lambda",
+        "Name": {
+          "Fn::Sub": "${AWS::StackName}-ChangeEBSEvent"
+        },
+        "ScheduleExpression": {
+          "Ref": "ScheduleExpression"
+        },
+        "State": "ENABLED",
+        "Targets": [{
+          "Arn": {
+            "Fn::GetAtt": [
+              "ModifyEbs",
+              "Arn"
+            ]
+          },
+          "Id": "ModifyEbs"
+        }]
+      }
+    }
+  }
+}
